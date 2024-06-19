@@ -1,0 +1,123 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+
+// Replace with your network credentials
+
+// Replace with your network credentials
+const char* ssid = "vivo V29 Pro";
+const char* password = "12345678";
+
+// Google Apps Script Web App URL
+const char* serverUrl = "https://script.google.com/macros/s/AKfycbxHlGz7298ghp6rrVvtcshVHtLH8CHS0kaSYyx_7m4rplpvOqhCWQgMmJMa1WjhivS-/exec";
+
+// IP Geolocation API URL
+const char* geolocationApiUrl = "http://ip-api.com/json/";
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  Serial.println("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("Connected to WiFi");
+
+  Serial.println("Enter data to upload and press enter:");
+}
+
+void loop() {
+  // Check if data is available to read from the Serial Monitor
+  if (Serial.available() > 0) {
+    // Read the incoming data as a string
+    String dataToUpload = Serial.readStringUntil('\n');
+    dataToUpload.trim();  // Remove any leading/trailing whitespace
+
+    // Get location data
+    String locationData = getLocation();
+    if (locationData == "") {
+      Serial.println("Failed to get location data");
+      return;
+    }
+
+    // Split location data
+    int firstComma = locationData.indexOf(',');
+    int secondComma = locationData.indexOf(',', firstComma + 1);
+    int thirdComma = locationData.indexOf(',', secondComma + 1);
+    int fourthComma = locationData.indexOf(',', thirdComma + 1);
+    int fifthComma = locationData.indexOf(',', fourthComma + 1);
+    String city = locationData.substring(0, firstComma);
+    String region = locationData.substring(firstComma + 1, secondComma);
+    String country = locationData.substring(secondComma + 1, thirdComma);
+    String lat = locationData.substring(thirdComma + 1, fourthComma);
+    String lon = locationData.substring(fourthComma + 1, fifthComma);
+
+    if (uploadDataToServer(dataToUpload, city, region, country, lat, lon)) {
+      Serial.println("Data uploaded successfully");
+    } else {
+      Serial.println("Failed to upload data");
+    }
+
+    Serial.println("Enter data to upload and press enter:");
+  }
+}
+
+String getLocation() {
+  HTTPClient http;
+  http.begin(geolocationApiUrl);
+  int httpResponseCode = http.GET();
+
+  if (httpResponseCode > 0) {
+    String payload = http.getString();
+    http.end();
+
+    // Parse the JSON response
+    DynamicJsonDocument doc(1024);
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+      Serial.print("JSON parsing failed: ");
+      Serial.println(error.c_str());
+      return "";
+    }
+
+    String city = doc["city"].as<String>();
+    String region = doc["regionName"].as<String>();
+    String country = doc["country"].as<String>();
+    float lat = doc["lat"];  // Get latitude
+    float lon = doc["lon"];  // Get longitude
+
+    String location = city + "," + region + "," + country + "," + String(lat, 6) + "," + String(lon, 6);
+    return location;
+  } else {
+    Serial.print("Error on HTTP request: ");
+    Serial.println(httpResponseCode);
+    http.end();
+    return "";
+  }
+}
+
+bool uploadDataToServer(const String& data, const String& city, const String& region, const String& country, const String& lat, const String& lon) {
+  HTTPClient http;
+  http.begin(serverUrl);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+  String httpRequestData = "data=" + data + "&city=" + city + "&region=" + region + "&country=" + country + "&lat=" + lat + "&lon=" + lon;
+  int httpResponseCode = http.POST(httpRequestData);
+
+  if (httpResponseCode > 0) {
+    String response = http.getString();
+    Serial.println(httpResponseCode);
+    Serial.println(response);
+    http.end();
+    return true;
+  } else {
+    Serial.print("Error on sending POST: ");
+    Serial.println(httpResponseCode);
+    http.end();
+    return false;
+  }
+}
